@@ -31,6 +31,7 @@ func printUsage() {
 	cyan.Println("    pqscan <domain>                              Basic scan")
 	cyan.Println("    pqscan <domain1> <domain2> <domain3>          Multiple targets")
 	cyan.Println("    pqscan --targets servers.txt                  Scan from file")
+	cyan.Println("    pqscan --enumerate <domain>                   Discover subdomains first")
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
 	cyan.Println("    pqscan --format html <domain>                 HTML report")
 	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
@@ -39,17 +40,24 @@ func printUsage() {
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
+	cyan.Println("    pqscan --enumerate google.com")
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
 	cyan.Println("    pqscan --targets my-servers.txt")
-	cyan.Println("    pqscan --format html --targets servers.txt")
+	cyan.Println("    pqscan --format html --enumerate example.com")
 	cyan.Println("    pqscan --format json -o report.json --targets servers.txt")
 	cyan.Println("    pqscan --quiet microsoft.com")
+	fmt.Println()
+	white.Println("  ENUMERATE MODE:")
+	cyan.Println("    Discovers subdomains using:")
+	cyan.Println("      • Certificate Transparency logs (crt.sh)")
+	cyan.Println("      • DNS brute-force (200 common subdomains)")
+	cyan.Println("      • DNS records (MX, NS, SRV, TXT/SPF)")
+	cyan.Println("    Then scans ALL discovered subdomains.")
 	fmt.Println()
 	white.Println("  TARGET FILE FORMAT (one domain per line):")
 	cyan.Println("    google.com")
 	cyan.Println("    github.com")
 	cyan.Println("    # this is a comment")
-	cyan.Println("    cloudflare.com")
 	fmt.Println()
 }
 
@@ -70,6 +78,7 @@ func main() {
 	outputFile := ""
 	targetsFile := ""
 	quiet := false
+	enumerate := false
 	workers := 3
 	var targets []string
 
@@ -101,6 +110,8 @@ func main() {
 				}
 				i++
 			}
+		case "--enumerate", "-e":
+			enumerate = true
 		case "--quiet", "-q":
 			quiet = true
 		case "--help", "-h":
@@ -139,8 +150,32 @@ func main() {
 		fmt.Println(banner)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
+
+	// If enumerate mode, discover subdomains first
+	if enumerate {
+		var allSubdomains []string
+
+		for _, target := range targets {
+			subs, err := EnumerateSubdomains(ctx, target)
+			if err != nil {
+				color.Red("  Error enumerating %s: %v", target, err)
+				// Still include the base domain
+				allSubdomains = append(allSubdomains, target)
+				continue
+			}
+			allSubdomains = append(allSubdomains, subs...)
+		}
+
+		// Replace targets with discovered subdomains
+		targets = deduplicateTargets(allSubdomains)
+
+		if !quiet {
+			white := color.New(color.FgWhite, color.Bold)
+			white.Printf("  Starting scan of %d discovered subdomains...\n\n", len(targets))
+		}
+	}
 
 	// Single target mode
 	if len(targets) == 1 {
@@ -150,36 +185,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		switch format {
-		case "json":
-			err = PrintJSONReport(targets[0], results, outputFile)
-		case "html":
-			if outputFile == "" {
-				outputFile = targets[0] + "-pqscan-report.html"
-			}
-			err = GenerateHTMLReport(targets[0], results, outputFile)
-		case "cli":
-			if quiet {
-				vulnerable := 0
-				for _, r := range results {
-					if r.RiskLevel != "SAFE" {
-						vulnerable++
-					}
-				}
-				pct := float64(vulnerable) / float64(len(results)) * 100
-				fmt.Printf("%.1f\n", pct)
-			} else {
-				PrintReport(targets[0], results)
-			}
-		default:
-			color.Red("  Unknown format: %s (use: cli, json, html)", format)
-			os.Exit(1)
-		}
-
-		if err != nil {
-			color.Red("  Error: %v", err)
-			os.Exit(1)
-		}
+		outputResults(format, outputFile, targets[0], results, quiet)
 
 		// Exit code for CI/CD
 		for _, r := range results {
@@ -237,8 +243,43 @@ func deduplicateTargets(targets []string) []string {
 		lower := strings.ToLower(strings.TrimSpace(t))
 		if lower != "" && !seen[lower] {
 			seen[lower] = true
-			unique = append(unique, t)
+			unique = append(unique, lower)
 		}
 	}
 	return unique
+}
+
+func outputResults(format, outputFile, target string, results []ScanResult, quiet bool) {
+	var err error
+
+	switch format {
+	case "json":
+		err = PrintJSONReport(target, results, outputFile)
+	case "html":
+		if outputFile == "" {
+			outputFile = target + "-pqscan-report.html"
+		}
+		err = GenerateHTMLReport(target, results, outputFile)
+	case "cli":
+		if quiet {
+			vulnerable := 0
+			for _, r := range results {
+				if r.RiskLevel != "SAFE" {
+					vulnerable++
+				}
+			}
+			pct := float64(vulnerable) / float64(len(results)) * 100
+			fmt.Printf("%.1f\n", pct)
+		} else {
+			PrintReport(target, results)
+		}
+	default:
+		color.Red("  Unknown format: %s (use: cli, json, html)", format)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		color.Red("  Error: %v", err)
+		os.Exit(1)
+	}
 }
