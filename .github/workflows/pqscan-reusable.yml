@@ -1,0 +1,97 @@
+# =============================================================
+# PQScan — Reusable Workflow
+# =============================================================
+# 
+# Use this in other repos:
+#
+#   jobs:
+#     quantum-scan:
+#       uses: YOUR_USERNAME/pqscan/.github/workflows/pqscan-reusable.yml@main
+#       with:
+#         targets: 'mysite.com api.mysite.com'
+# =============================================================
+
+name: PQScan Reusable
+
+on:
+  workflow_call:
+    inputs:
+      targets:
+        description: 'Domains to scan (space-separated)'
+        required: true
+        type: string
+      fail_on_critical:
+        description: 'Fail workflow on critical findings'
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      status:
+        description: 'SAFE or CRITICAL'
+        value: ${{ jobs.scan.outputs.status }}
+      score:
+        description: 'Risk score 0-100'
+        value: ${{ jobs.scan.outputs.score }}
+
+jobs:
+  scan:
+    name: Quantum Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      status: ${{ steps.scan.outputs.status }}
+      score: ${{ steps.results.outputs.score }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Build pqscan
+        run: |
+          go mod tidy
+          go build -o pqscan ./cmd/pqscan/
+
+      - name: Run scan
+        id: scan
+        continue-on-error: true
+        run: |
+          ./pqscan --format json -o results.json ${{ inputs.targets }}
+          if [ $? -eq 0 ]; then
+            echo "status=SAFE" >> $GITHUB_OUTPUT
+          else
+            echo "status=CRITICAL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate reports
+        if: always()
+        run: |
+          ./pqscan --format html -o report.html ${{ inputs.targets }} 2>&1 || true
+
+      - name: Parse results
+        id: results
+        if: always()
+        run: |
+          if [ -f results.json ]; then
+            SCORE=$(python3 -c "import json; print(json.load(open('results.json')).get('summary',{}).get('risk_score',0))" 2>/dev/null || echo "0")
+            echo "score=$SCORE" >> $GITHUB_OUTPUT
+          else
+            echo "score=0" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pqscan-report
+          path: |
+            results.json
+            report.html
+
+      - name: Enforce policy
+        if: inputs.fail_on_critical && steps.scan.outputs.status == 'CRITICAL'
+        run: |
+          echo "🔴 Critical quantum vulnerabilities found"
+          exit 1

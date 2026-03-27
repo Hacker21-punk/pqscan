@@ -1,0 +1,32 @@
+# =============================================================
+# PQScan Target Domains
+# =============================================================
+# Add your production domains here, one per line.
+# Lines starting with # are comments.
+#
+# These domains will be scanned by:
+#   - CI/CD pipeline on every push
+#   - Weekly scheduled scans
+#   - Manual workflow triggers
+# =============================================================
+
+# Primary domains
+# example.com
+# www.example.com
+
+# API endpoints
+# api.example.com
+
+# Mail servers
+# mail.example.com
+
+# Internal tools (if internet-facing)
+# admin.example.com
+# vpn.example.com
+
+# ─────────────────────────────────────────────
+# INSTRUCTIONS:
+# 1. Uncomment and replace example.com with your domains
+# 2. Commit and push
+# 3. The scan will run automatically
+# ─────────────────────────────────────────────

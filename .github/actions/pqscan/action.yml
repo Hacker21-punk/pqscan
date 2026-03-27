@@ -1,0 +1,94 @@
+# .github/actions/pqscan/action.yml
+# 
+# USE IN ANY REPO:
+#   - uses: YOUR_USERNAME/pqscan/.github/actions/pqscan@main
+#     with:
+#       targets: 'mysite.com api.mysite.com'
+
+name: 'PQScan'
+description: 'Scan for post-quantum cryptography vulnerabilities'
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  targets:
+    description: 'Domains to scan (space-separated)'
+    required: true
+  fail-on-critical:
+    description: 'Fail the step if critical findings detected'
+    required: false
+    default: 'true'
+  format:
+    description: 'Output format (cli, json, html)'
+    required: false
+    default: 'json'
+
+outputs:
+  status:
+    description: 'SAFE or CRITICAL'
+    value: ${{ steps.scan.outputs.status }}
+  score:
+    description: 'Risk score 0-100'
+    value: ${{ steps.scan.outputs.score }}
+  critical-count:
+    description: 'Number of critical findings'
+    value: ${{ steps.scan.outputs.critical }}
+  report-path:
+    description: 'Path to the generated report'
+    value: ${{ steps.scan.outputs.report_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+
+    - name: Build pqscan
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}/../../..
+        go mod tidy
+        go build -o /tmp/pqscan ./cmd/pqscan/
+
+    - name: Run scan
+      id: scan
+      shell: bash
+      run: |
+        /tmp/pqscan --format json -o /tmp/pqscan-results.json ${{ inputs.targets }} 2>&1 || true
+        /tmp/pqscan --format html -o /tmp/pqscan-report.html ${{ inputs.targets }} 2>&1 || true
+        
+        # Parse results
+        if [ -f /tmp/pqscan-results.json ]; then
+          SCORE=$(python3 -c "import json; print(json.load(open('/tmp/pqscan-results.json')).get('summary',{}).get('risk_score',0))" 2>/dev/null || echo "100")
+          CRITICAL=$(python3 -c "import json; print(json.load(open('/tmp/pqscan-results.json')).get('summary',{}).get('critical',0))" 2>/dev/null || echo "0")
+        else
+          SCORE=0
+          CRITICAL=0
+        fi
+        
+        if [ "$CRITICAL" -gt 0 ]; then
+          echo "status=CRITICAL" >> $GITHUB_OUTPUT
+        else
+          echo "status=SAFE" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "score=$SCORE" >> $GITHUB_OUTPUT
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "report_path=/tmp/pqscan-report.html" >> $GITHUB_OUTPUT
+        
+        # Copy reports to workspace
+        cp /tmp/pqscan-results.json ./pqscan-results.json 2>/dev/null || true
+        cp /tmp/pqscan-report.html ./pqscan-report.html 2>/dev/null || true
+
+    - name: Enforce policy
+      if: inputs.fail-on-critical == 'true'
+      shell: bash
+      run: |
+        if [ "${{ steps.scan.outputs.status }}" = "CRITICAL" ]; then
+          echo "🔴 Critical quantum vulnerabilities detected"
+          echo "   ${{ steps.scan.outputs.critical }} endpoints use quantum-vulnerable encryption"
+          exit 1
+        fi
