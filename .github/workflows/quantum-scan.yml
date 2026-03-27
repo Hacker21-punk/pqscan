@@ -26,8 +26,7 @@ jobs:
           go build -o pqscan ./cmd/pqscan/
 
       - name: Run scan
-        continue-on-error: true
-        run: ./pqscan --format html -o report.html google.com
+        run: ./pqscan --format html -o report.html google.com || true
 
       - name: Upload report
         if: always()
@@ -35,4 +34,4 @@ jobs:
         with:
           name: quantum-report
           path: report.html
-          retention-days: 30
+          if-no-files-found: ignore
