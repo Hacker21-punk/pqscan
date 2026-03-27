@@ -1,0 +1,17 @@
+# In any repo: .github/workflows/quantum-scan.yml
+name: Quantum Scan
+on: [push]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go install github.com/YOUR_USERNAME/pqscan/cmd/pqscan@latest
+      - run: pqscan --format html -o report.html mysite.com
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quantum-report
+          path: report.html

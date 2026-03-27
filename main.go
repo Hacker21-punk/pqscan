@@ -35,9 +35,17 @@ func printUsage() {
 	cyan.Println("    pqscan --targets servers.txt                  Scan from file")
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
 	cyan.Println("    pqscan --format html <domain>                 HTML report")
+	cyan.Println("    pqscan --format pdf <domain>                  PDF report")
 	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
+	cyan.Println("    pqscan --format pdf -o report.pdf <domain>    Save PDF to file")
 	cyan.Println("    pqscan --workers 10 --targets servers.txt     Control concurrency")
 	cyan.Println("    pqscan --quiet <domain>                       Score only")
+	fmt.Println()
+	white.Println("  FORMATS:")
+	cyan.Println("    cli    Terminal output (default)")
+	cyan.Println("    json   Machine-readable JSON")
+	cyan.Println("    html   Beautiful HTML report")
+	cyan.Println("    pdf    Executive PDF report")
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
@@ -46,6 +54,8 @@ func printUsage() {
 	cyan.Println("    pqscan --enumerate google.com")
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
 	cyan.Println("    pqscan --format html --chain google.com")
+	cyan.Println("    pqscan --format pdf -o executive-report.pdf google.com")
+	cyan.Println("    pqscan --format pdf --targets servers.txt")
 	cyan.Println("    pqscan --quiet microsoft.com")
 	fmt.Println()
 	white.Println("  CHAIN ANALYSIS MODE:")
@@ -56,6 +66,18 @@ func printUsage() {
 	cyan.Println("      • PQC / hybrid certificate detection")
 	cyan.Println("      • Validity period and expiry warnings")
 	cyan.Println("      • OCSP, CRL, and CT analysis")
+	fmt.Println()
+	white.Println("  ENUMERATE MODE:")
+	cyan.Println("    Discovers subdomains using:")
+	cyan.Println("      • Certificate Transparency logs (crt.sh)")
+	cyan.Println("      • DNS brute-force (200 common subdomains)")
+	cyan.Println("      • DNS records (MX, NS, SRV, TXT/SPF)")
+	cyan.Println("    Then scans ALL discovered subdomains.")
+	fmt.Println()
+	white.Println("  TARGET FILE FORMAT (one domain per line):")
+	cyan.Println("    google.com")
+	cyan.Println("    github.com")
+	cyan.Println("    # this is a comment")
 	fmt.Println()
 }
 
@@ -204,7 +226,7 @@ func main() {
 	// Multi-target mode
 	report := ScanMultipleTargets(ctx, targets, workers)
 
-	// Chain analysis for multi-target
+	// Chain analysis for multi-target (CLI only)
 	if chainAnalysis && format == "cli" && !quiet {
 		white := color.New(color.FgWhite, color.Bold)
 		white.Println("\n CERTIFICATE CHAIN ANALYSIS (per target):")
@@ -242,6 +264,17 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "pdf":
+		if outputFile == "" {
+			outputFile = "pqscan-aggregate-report.pdf"
+		}
+		allResults := FlattenResults(report)
+		err := GeneratePDFReport("multiple-targets", allResults, outputFile)
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+
 	case "cli":
 		if quiet {
 			fmt.Printf("%.1f\n", report.OverallScore)
@@ -250,7 +283,7 @@ func main() {
 		}
 
 	default:
-		color.Red("  Unknown format: %s (use: cli, json, html)", format)
+		color.Red("  Unknown format: %s (use: cli, json, html, pdf)", format)
 		os.Exit(1)
 	}
 
@@ -283,6 +316,11 @@ func outputResults(format, outputFile, target string, results []ScanResult, quie
 			outputFile = target + "-pqscan-report.html"
 		}
 		err = GenerateHTMLReport(target, results, outputFile)
+	case "pdf":
+		if outputFile == "" {
+			outputFile = target + "-pqscan-report.pdf"
+		}
+		err = GeneratePDFReport(target, results, outputFile)
 	case "cli":
 		if quiet {
 			vulnerable := 0
@@ -297,7 +335,7 @@ func outputResults(format, outputFile, target string, results []ScanResult, quie
 			PrintReport(target, results)
 		}
 	default:
-		color.Red("  Unknown format: %s (use: cli, json, html)", format)
+		color.Red("  Unknown format: %s (use: cli, json, html, pdf)", format)
 		os.Exit(1)
 	}
 
