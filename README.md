@@ -36,9 +36,9 @@ CNSA 2.0 compliance status.
 
 ```bash
 # Build from source
-git clone https://github.com/YOUR_USERNAME/pqscan.git
+git clone https://github.com/Hacker21-punk/pqscan.git
 cd pqscan
 go build -o pqscan ./cmd/pqscan/
 
 # Or install directly
-go install github.com/YOUR_USERNAME/pqscan/cmd/pqscan@latest
+go install github.com/Hacker21-punk/pqscan/cmd/pqscan@latest
