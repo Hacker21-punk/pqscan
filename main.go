@@ -29,17 +29,27 @@ func printUsage() {
 
 	white.Println("  USAGE:")
 	cyan.Println("    pqscan <domain>                              Basic scan")
+	cyan.Println("    pqscan <domain1> <domain2> <domain3>          Multiple targets")
+	cyan.Println("    pqscan --targets servers.txt                  Scan from file")
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
 	cyan.Println("    pqscan --format html <domain>                 HTML report")
 	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
-	cyan.Println("    pqscan --format json -o report.json <domain>  Save JSON to file")
+	cyan.Println("    pqscan --workers 10 --targets servers.txt     Control concurrency")
 	cyan.Println("    pqscan --quiet <domain>                       Score only")
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
-	cyan.Println("    pqscan --format html github.com")
-	cyan.Println("    pqscan --format json -o report.json cloudflare.com")
+	cyan.Println("    pqscan google.com github.com cloudflare.com")
+	cyan.Println("    pqscan --targets my-servers.txt")
+	cyan.Println("    pqscan --format html --targets servers.txt")
+	cyan.Println("    pqscan --format json -o report.json --targets servers.txt")
 	cyan.Println("    pqscan --quiet microsoft.com")
+	fmt.Println()
+	white.Println("  TARGET FILE FORMAT (one domain per line):")
+	cyan.Println("    google.com")
+	cyan.Println("    github.com")
+	cyan.Println("    # this is a comment")
+	cyan.Println("    cloudflare.com")
 	fmt.Println()
 }
 
@@ -55,10 +65,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Parse flags
 	format := "cli"
 	outputFile := ""
+	targetsFile := ""
 	quiet := false
-	var target string
+	workers := 3
+	var targets []string
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -72,6 +85,22 @@ func main() {
 				outputFile = args[i+1]
 				i++
 			}
+		case "--targets", "-t":
+			if i+1 < len(args) {
+				targetsFile = args[i+1]
+				i++
+			}
+		case "--workers", "-w":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &workers)
+				if workers < 1 {
+					workers = 1
+				}
+				if workers > 20 {
+					workers = 20
+				}
+				i++
+			}
 		case "--quiet", "-q":
 			quiet = true
 		case "--help", "-h":
@@ -82,14 +111,27 @@ func main() {
 			os.Exit(0)
 		default:
 			if !isFlag(args[i]) {
-				target = args[i]
+				targets = append(targets, args[i])
 			}
 		}
 	}
 
-	if target == "" {
+	// Load targets from file if specified
+	if targetsFile != "" {
+		fileTargets, err := LoadTargetsFromFile(targetsFile)
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+		targets = append(targets, fileTargets...)
+	}
+
+	// Deduplicate targets
+	targets = deduplicateTargets(targets)
+
+	if len(targets) == 0 {
 		printUsage()
-		color.Red("  Error: no target specified")
+		color.Red("  Error: no targets specified")
 		os.Exit(1)
 	}
 
@@ -97,19 +139,64 @@ func main() {
 		fmt.Println(banner)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	results, err := ScanTarget(ctx, target)
-	if err != nil {
-		color.Red("  Error: %v", err)
-		os.Exit(1)
+	// Single target mode
+	if len(targets) == 1 {
+		results, err := ScanTarget(ctx, targets[0])
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+
+		switch format {
+		case "json":
+			err = PrintJSONReport(targets[0], results, outputFile)
+		case "html":
+			if outputFile == "" {
+				outputFile = targets[0] + "-pqscan-report.html"
+			}
+			err = GenerateHTMLReport(targets[0], results, outputFile)
+		case "cli":
+			if quiet {
+				vulnerable := 0
+				for _, r := range results {
+					if r.RiskLevel != "SAFE" {
+						vulnerable++
+					}
+				}
+				pct := float64(vulnerable) / float64(len(results)) * 100
+				fmt.Printf("%.1f\n", pct)
+			} else {
+				PrintReport(targets[0], results)
+			}
+		default:
+			color.Red("  Unknown format: %s (use: cli, json, html)", format)
+			os.Exit(1)
+		}
+
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+
+		// Exit code for CI/CD
+		for _, r := range results {
+			if strings.Contains(r.RiskLevel, "CRITICAL") {
+				os.Exit(1)
+			}
+		}
+		return
 	}
 
-	// Output based on format
+	// Multi-target mode
+	report := ScanMultipleTargets(ctx, targets, workers)
+
 	switch format {
 	case "json":
-		err = PrintJSONReport(target, results, outputFile)
+		allResults := FlattenResults(report)
+		err := PrintJSONReport("multiple-targets", allResults, outputFile)
 		if err != nil {
 			color.Red("  Error: %v", err)
 			os.Exit(1)
@@ -117,9 +204,9 @@ func main() {
 
 	case "html":
 		if outputFile == "" {
-			outputFile = target + "-pqscan-report.html"
+			outputFile = "pqscan-aggregate-report.html"
 		}
-		err = GenerateHTMLReport(target, results, outputFile)
+		err := GenerateAggregateHTMLReport(report, outputFile)
 		if err != nil {
 			color.Red("  Error: %v", err)
 			os.Exit(1)
@@ -127,16 +214,9 @@ func main() {
 
 	case "cli":
 		if quiet {
-			vulnerable := 0
-			for _, r := range results {
-				if r.RiskLevel != "SAFE" {
-					vulnerable++
-				}
-			}
-			pct := float64(vulnerable) / float64(len(results)) * 100
-			fmt.Printf("%.1f\n", pct)
+			fmt.Printf("%.1f\n", report.OverallScore)
 		} else {
-			PrintReport(target, results)
+			PrintAggregateReport(report)
 		}
 
 	default:
@@ -144,10 +224,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Exit code 1 if critical findings (for CI/CD)
-	for _, r := range results {
-		if strings.Contains(r.RiskLevel, "CRITICAL") {
-			os.Exit(1)
+	// Exit code for CI/CD
+	if report.TotalCritical > 0 {
+		os.Exit(1)
+	}
+}
+
+func deduplicateTargets(targets []string) []string {
+	seen := make(map[string]bool)
+	var unique []string
+	for _, t := range targets {
+		lower := strings.ToLower(strings.TrimSpace(t))
+		if lower != "" && !seen[lower] {
+			seen[lower] = true
+			unique = append(unique, t)
 		}
 	}
+	return unique
 }

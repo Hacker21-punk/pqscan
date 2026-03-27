@@ -1,0 +1,6 @@
+# My test targets for pqscan
+google.com
+github.com
+cloudflare.com
+microsoft.com
+amazon.com
