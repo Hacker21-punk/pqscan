@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -13,8 +14,8 @@ const banner = `
  ╔══════════════════════════════════════════════════╗
  ║   ___  ___  ___                                  ║
  ║  | _ \/ _ \/ __|  ___ __ _ _ _                  ║
- ║  |  _/ (_) \__ \ / _/` + " `" + `_` + "`" + ` | ' \                 ║
- ║  |_|  \__\_\___/ \__\__,_|_||_|                ║
+ ║  |  _/ (_) \__ \ / _/ _  | ' \                  ║
+ ║  |_|  \__\_\___/ \__\__,_|_||_|                 ║
  ║                                                  ║
  ║  Post-Quantum Vulnerability Scanner v0.1.0       ║
  ║  "Find it before the quantum computer does"      ║
@@ -27,20 +28,26 @@ func printUsage() {
 	white := color.New(color.FgWhite, color.Bold)
 
 	white.Println("  USAGE:")
-	cyan.Println("    pqscan <domain>                        Basic scan")
-	cyan.Println("    pqscan --format json <domain>           JSON output")
-	cyan.Println("    pqscan --format json -o report.json <domain>  Save to file")
-	cyan.Println("    pqscan --quiet <domain>                 Score only")
+	cyan.Println("    pqscan <domain>                              Basic scan")
+	cyan.Println("    pqscan --format json <domain>                 JSON output")
+	cyan.Println("    pqscan --format html <domain>                 HTML report")
+	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
+	cyan.Println("    pqscan --format json -o report.json <domain>  Save JSON to file")
+	cyan.Println("    pqscan --quiet <domain>                       Score only")
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
-	cyan.Println("    pqscan --format json github.com")
-	cyan.Println("    pqscan --quiet cloudflare.com")
+	cyan.Println("    pqscan --format html github.com")
+	cyan.Println("    pqscan --format json -o report.json cloudflare.com")
+	cyan.Println("    pqscan --quiet microsoft.com")
 	fmt.Println()
 }
 
+func isFlag(s string) bool {
+	return len(s) > 0 && s[0] == '-'
+}
+
 func main() {
-	// Parse simple flags
 	args := os.Args[1:]
 
 	if len(args) == 0 {
@@ -93,7 +100,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	// Run the scan
 	results, err := ScanTarget(ctx, target)
 	if err != nil {
 		color.Red("  Error: %v", err)
@@ -109,9 +115,18 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "html":
+		if outputFile == "" {
+			outputFile = target + "-pqscan-report.html"
+		}
+		err = GenerateHTMLReport(target, results, outputFile)
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+
 	case "cli":
 		if quiet {
-			// Just print the score
 			vulnerable := 0
 			for _, r := range results {
 				if r.RiskLevel != "SAFE" {
@@ -125,18 +140,14 @@ func main() {
 		}
 
 	default:
-		color.Red("  Unknown format: %s (use: cli, json)", format)
+		color.Red("  Unknown format: %s (use: cli, json, html)", format)
 		os.Exit(1)
 	}
 
-	// Exit code: 1 if any critical findings (for CI/CD)
+	// Exit code 1 if critical findings (for CI/CD)
 	for _, r := range results {
-		if r.RiskLevel == "CRITICAL" {
+		if strings.Contains(r.RiskLevel, "CRITICAL") {
 			os.Exit(1)
 		}
 	}
-}
-
-func isFlag(s string) bool {
-	return len(s) > 0 && s[0] == '-'
 }
