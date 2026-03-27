@@ -36,8 +36,10 @@ func printUsage() {
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
 	cyan.Println("    pqscan --format html <domain>                 HTML report")
 	cyan.Println("    pqscan --format pdf <domain>                  PDF report")
+	cyan.Println("    pqscan --format cbom <domain>                 CBOM output (CycloneDX)")
 	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
 	cyan.Println("    pqscan --format pdf -o report.pdf <domain>    Save PDF to file")
+	cyan.Println("    pqscan --format cbom -o cbom.json <domain>    Save CBOM to file")
 	cyan.Println("    pqscan --workers 10 --targets servers.txt     Control concurrency")
 	cyan.Println("    pqscan --quiet <domain>                       Score only")
 	fmt.Println()
@@ -46,6 +48,7 @@ func printUsage() {
 	cyan.Println("    json   Machine-readable JSON")
 	cyan.Println("    html   Beautiful HTML report")
 	cyan.Println("    pdf    Executive PDF report")
+	cyan.Println("    cbom   CycloneDX Cryptographic Bill of Materials")
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
@@ -55,7 +58,7 @@ func printUsage() {
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
 	cyan.Println("    pqscan --format html --chain google.com")
 	cyan.Println("    pqscan --format pdf -o executive-report.pdf google.com")
-	cyan.Println("    pqscan --format pdf --targets servers.txt")
+	cyan.Println("    pqscan --format cbom -o inventory.json google.com")
 	cyan.Println("    pqscan --quiet microsoft.com")
 	fmt.Println()
 	white.Println("  CHAIN ANALYSIS MODE:")
@@ -64,20 +67,19 @@ func printUsage() {
 	cyan.Println("      • Key algorithm and size for EVERY cert")
 	cyan.Println("      • Signature algorithm analysis")
 	cyan.Println("      • PQC / hybrid certificate detection")
-	cyan.Println("      • Validity period and expiry warnings")
-	cyan.Println("      • OCSP, CRL, and CT analysis")
 	fmt.Println()
 	white.Println("  ENUMERATE MODE:")
 	cyan.Println("    Discovers subdomains using:")
 	cyan.Println("      • Certificate Transparency logs (crt.sh)")
 	cyan.Println("      • DNS brute-force (200 common subdomains)")
 	cyan.Println("      • DNS records (MX, NS, SRV, TXT/SPF)")
-	cyan.Println("    Then scans ALL discovered subdomains.")
 	fmt.Println()
-	white.Println("  TARGET FILE FORMAT (one domain per line):")
-	cyan.Println("    google.com")
-	cyan.Println("    github.com")
-	cyan.Println("    # this is a comment")
+	white.Println("  CBOM (Cryptographic Bill of Materials):")
+	cyan.Println("    Machine-readable inventory of all cryptographic assets.")
+	cyan.Println("    CycloneDX v1.6 format — compatible with:")
+	cyan.Println("      • OWASP Dependency-Track")
+	cyan.Println("      • IBM Quantum Safe Explorer")
+	cyan.Println("      • Security compliance platforms")
 	fmt.Println()
 }
 
@@ -93,7 +95,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Parse flags
 	format := "cli"
 	outputFile := ""
 	targetsFile := ""
@@ -150,7 +151,6 @@ func main() {
 		}
 	}
 
-	// Load targets from file
 	if targetsFile != "" {
 		fileTargets, err := LoadTargetsFromFile(targetsFile)
 		if err != nil {
@@ -175,7 +175,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
-	// Enumerate subdomains if requested
 	if enumerate {
 		var allSubdomains []string
 		for _, target := range targets {
@@ -195,7 +194,7 @@ func main() {
 		}
 	}
 
-	// Single target mode
+	// Single target
 	if len(targets) == 1 {
 		results, err := ScanTarget(ctx, targets[0])
 		if err != nil {
@@ -203,7 +202,6 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Certificate chain analysis
 		if chainAnalysis {
 			chain, chainErr := AnalyzeCertificateChain(targets[0], 443)
 			if chainErr != nil {
@@ -223,10 +221,9 @@ func main() {
 		return
 	}
 
-	// Multi-target mode
+	// Multi-target
 	report := ScanMultipleTargets(ctx, targets, workers)
 
-	// Chain analysis for multi-target (CLI only)
 	if chainAnalysis && format == "cli" && !quiet {
 		white := color.New(color.FgWhite, color.Bold)
 		white.Println("\n CERTIFICATE CHAIN ANALYSIS (per target):")
@@ -275,6 +272,17 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "cbom":
+		if outputFile == "" {
+			outputFile = "pqscan-aggregate-cbom.json"
+		}
+		allResults := FlattenResults(report)
+		err := GenerateCBOM("multiple-targets", allResults, outputFile)
+		if err != nil {
+			color.Red("  Error: %v", err)
+			os.Exit(1)
+		}
+
 	case "cli":
 		if quiet {
 			fmt.Printf("%.1f\n", report.OverallScore)
@@ -283,7 +291,7 @@ func main() {
 		}
 
 	default:
-		color.Red("  Unknown format: %s (use: cli, json, html, pdf)", format)
+		color.Red("  Unknown format: %s (use: cli, json, html, pdf, cbom)", format)
 		os.Exit(1)
 	}
 
@@ -321,6 +329,11 @@ func outputResults(format, outputFile, target string, results []ScanResult, quie
 			outputFile = target + "-pqscan-report.pdf"
 		}
 		err = GeneratePDFReport(target, results, outputFile)
+	case "cbom":
+		if outputFile == "" {
+			outputFile = target + "-cbom.json"
+		}
+		err = GenerateCBOM(target, results, outputFile)
 	case "cli":
 		if quiet {
 			vulnerable := 0
@@ -335,7 +348,7 @@ func outputResults(format, outputFile, target string, results []ScanResult, quie
 			PrintReport(target, results)
 		}
 	default:
-		color.Red("  Unknown format: %s (use: cli, json, html, pdf)", format)
+		color.Red("  Unknown format: %s (use: cli, json, html, pdf, cbom)", format)
 		os.Exit(1)
 	}
 
