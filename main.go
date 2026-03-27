@@ -29,9 +29,10 @@ func printUsage() {
 
 	white.Println("  USAGE:")
 	cyan.Println("    pqscan <domain>                              Basic scan")
+	cyan.Println("    pqscan --chain <domain>                      Deep cert chain analysis")
+	cyan.Println("    pqscan --enumerate <domain>                  Discover subdomains first")
 	cyan.Println("    pqscan <domain1> <domain2> <domain3>          Multiple targets")
 	cyan.Println("    pqscan --targets servers.txt                  Scan from file")
-	cyan.Println("    pqscan --enumerate <domain>                   Discover subdomains first")
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
 	cyan.Println("    pqscan --format html <domain>                 HTML report")
 	cyan.Println("    pqscan --format html -o report.html <domain>  Save HTML to file")
@@ -40,24 +41,21 @@ func printUsage() {
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
+	cyan.Println("    pqscan --chain google.com")
+	cyan.Println("    pqscan --chain --enumerate example.com")
 	cyan.Println("    pqscan --enumerate google.com")
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
-	cyan.Println("    pqscan --targets my-servers.txt")
-	cyan.Println("    pqscan --format html --enumerate example.com")
-	cyan.Println("    pqscan --format json -o report.json --targets servers.txt")
+	cyan.Println("    pqscan --format html --chain google.com")
 	cyan.Println("    pqscan --quiet microsoft.com")
 	fmt.Println()
-	white.Println("  ENUMERATE MODE:")
-	cyan.Println("    Discovers subdomains using:")
-	cyan.Println("      • Certificate Transparency logs (crt.sh)")
-	cyan.Println("      • DNS brute-force (200 common subdomains)")
-	cyan.Println("      • DNS records (MX, NS, SRV, TXT/SPF)")
-	cyan.Println("    Then scans ALL discovered subdomains.")
-	fmt.Println()
-	white.Println("  TARGET FILE FORMAT (one domain per line):")
-	cyan.Println("    google.com")
-	cyan.Println("    github.com")
-	cyan.Println("    # this is a comment")
+	white.Println("  CHAIN ANALYSIS MODE:")
+	cyan.Println("    Performs deep analysis of the entire certificate chain:")
+	cyan.Println("      • Root CA → Intermediate → Leaf certificate")
+	cyan.Println("      • Key algorithm and size for EVERY cert")
+	cyan.Println("      • Signature algorithm analysis")
+	cyan.Println("      • PQC / hybrid certificate detection")
+	cyan.Println("      • Validity period and expiry warnings")
+	cyan.Println("      • OCSP, CRL, and CT analysis")
 	fmt.Println()
 }
 
@@ -79,6 +77,7 @@ func main() {
 	targetsFile := ""
 	quiet := false
 	enumerate := false
+	chainAnalysis := false
 	workers := 3
 	var targets []string
 
@@ -112,6 +111,8 @@ func main() {
 			}
 		case "--enumerate", "-e":
 			enumerate = true
+		case "--chain", "-c":
+			chainAnalysis = true
 		case "--quiet", "-q":
 			quiet = true
 		case "--help", "-h":
@@ -127,7 +128,7 @@ func main() {
 		}
 	}
 
-	// Load targets from file if specified
+	// Load targets from file
 	if targetsFile != "" {
 		fileTargets, err := LoadTargetsFromFile(targetsFile)
 		if err != nil {
@@ -137,7 +138,6 @@ func main() {
 		targets = append(targets, fileTargets...)
 	}
 
-	// Deduplicate targets
 	targets = deduplicateTargets(targets)
 
 	if len(targets) == 0 {
@@ -153,22 +153,18 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
-	// If enumerate mode, discover subdomains first
+	// Enumerate subdomains if requested
 	if enumerate {
 		var allSubdomains []string
-
 		for _, target := range targets {
 			subs, err := EnumerateSubdomains(ctx, target)
 			if err != nil {
 				color.Red("  Error enumerating %s: %v", target, err)
-				// Still include the base domain
 				allSubdomains = append(allSubdomains, target)
 				continue
 			}
 			allSubdomains = append(allSubdomains, subs...)
 		}
-
-		// Replace targets with discovered subdomains
 		targets = deduplicateTargets(allSubdomains)
 
 		if !quiet {
@@ -185,9 +181,18 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Certificate chain analysis
+		if chainAnalysis {
+			chain, chainErr := AnalyzeCertificateChain(targets[0], 443)
+			if chainErr != nil {
+				color.Yellow("  ⚠ Chain analysis failed: %v", chainErr)
+			} else {
+				PrintCertChainReport(chain)
+			}
+		}
+
 		outputResults(format, outputFile, targets[0], results, quiet)
 
-		// Exit code for CI/CD
 		for _, r := range results {
 			if strings.Contains(r.RiskLevel, "CRITICAL") {
 				os.Exit(1)
@@ -198,6 +203,25 @@ func main() {
 
 	// Multi-target mode
 	report := ScanMultipleTargets(ctx, targets, workers)
+
+	// Chain analysis for multi-target
+	if chainAnalysis && format == "cli" && !quiet {
+		white := color.New(color.FgWhite, color.Bold)
+		white.Println("\n CERTIFICATE CHAIN ANALYSIS (per target):")
+		fmt.Println(" " + strings.Repeat("═", 55))
+
+		for _, tr := range report.Targets {
+			if tr.Error != nil {
+				continue
+			}
+			chain, err := AnalyzeCertificateChain(tr.Target, 443)
+			if err != nil {
+				color.Yellow("  ⚠ %s: chain analysis failed: %v\n", tr.Target, err)
+				continue
+			}
+			PrintCertChainReport(chain)
+		}
+	}
 
 	switch format {
 	case "json":
@@ -230,7 +254,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Exit code for CI/CD
 	if report.TotalCritical > 0 {
 		os.Exit(1)
 	}
