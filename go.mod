@@ -1,4 +1,4 @@
-module github.com/YOUR_GITHUB_USERNAME/pqscan
+module github.com/Hacker21-punk/pqscan
 
 go 1.25.0
 
