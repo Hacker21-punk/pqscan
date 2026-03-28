@@ -29,6 +29,7 @@ func printUsage() {
 
 	white.Println("  USAGE:")
 	cyan.Println("    pqscan <domain>                              Basic scan")
+	cyan.Println("    pqscan --full-scan <domain>                   Full cipher enumeration")
 	cyan.Println("    pqscan --chain <domain>                      Deep cert chain analysis")
 	cyan.Println("    pqscan --enumerate <domain>                  Discover subdomains first")
 	cyan.Println("    pqscan <domain1> <domain2> <domain3>          Multiple targets")
@@ -52,7 +53,9 @@ func printUsage() {
 	fmt.Println()
 	white.Println("  EXAMPLES:")
 	cyan.Println("    pqscan google.com")
+	cyan.Println("    pqscan --full-scan google.com")
 	cyan.Println("    pqscan --chain google.com")
+	cyan.Println("    pqscan --full-scan --chain google.com")
 	cyan.Println("    pqscan --chain --enumerate example.com")
 	cyan.Println("    pqscan --enumerate google.com")
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
@@ -60,6 +63,14 @@ func printUsage() {
 	cyan.Println("    pqscan --format pdf -o executive-report.pdf google.com")
 	cyan.Println("    pqscan --format cbom -o inventory.json google.com")
 	cyan.Println("    pqscan --quiet microsoft.com")
+	fmt.Println()
+	white.Println("  FULL SCAN MODE:")
+	cyan.Println("    Tests EVERY cipher suite and TLS version:")
+	cyan.Println("      • All TLS versions (SSL3, TLS 1.0-1.3)")
+	cyan.Println("      • All cipher suites (15+ tested individually)")
+	cyan.Println("      • All key exchange groups (X25519, P-256, P-384, P-521)")
+	cyan.Println("      • PQC key exchange probing (X25519Kyber768, MLKEM768)")
+	cyan.Println("      • Cipher order preference detection")
 	fmt.Println()
 	white.Println("  CHAIN ANALYSIS MODE:")
 	cyan.Println("    Performs deep analysis of the entire certificate chain:")
@@ -101,6 +112,7 @@ func main() {
 	quiet := false
 	enumerate := false
 	chainAnalysis := false
+	fullScan := false
 	workers := 3
 	var targets []string
 
@@ -136,6 +148,8 @@ func main() {
 			enumerate = true
 		case "--chain", "-c":
 			chainAnalysis = true
+		case "--full-scan", "--full":
+			fullScan = true
 		case "--quiet", "-q":
 			quiet = true
 		case "--help", "-h":
@@ -194,7 +208,7 @@ func main() {
 		}
 	}
 
-	// Single target
+	// Single target mode
 	if len(targets) == 1 {
 		results, err := ScanTarget(ctx, targets[0])
 		if err != nil {
@@ -202,12 +216,25 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Certificate chain analysis
 		if chainAnalysis {
 			chain, chainErr := AnalyzeCertificateChain(targets[0], 443)
 			if chainErr != nil {
 				color.Yellow("  ⚠ Chain analysis failed: %v", chainErr)
 			} else {
 				PrintCertChainReport(chain)
+			}
+		}
+
+		// Full cipher enumeration
+		if fullScan {
+			cyan := color.New(color.FgCyan)
+			cyan.Println("\n  Running full cipher enumeration (this takes 30-60 seconds)...")
+			enumResult, enumErr := EnumerateCiphers(targets[0], 443)
+			if enumErr != nil {
+				color.Yellow("  ⚠ Cipher enumeration failed: %v", enumErr)
+			} else {
+				PrintCipherEnumReport(enumResult)
 			}
 		}
 
@@ -221,7 +248,7 @@ func main() {
 		return
 	}
 
-	// Multi-target
+	// Multi-target mode
 	report := ScanMultipleTargets(ctx, targets, workers)
 
 	if chainAnalysis && format == "cli" && !quiet {
@@ -239,6 +266,27 @@ func main() {
 				continue
 			}
 			PrintCertChainReport(chain)
+		}
+	}
+
+	// Full scan for multi-target (CLI only)
+	if fullScan && format == "cli" && !quiet {
+		white := color.New(color.FgWhite, color.Bold)
+		white.Println("\n FULL CIPHER ENUMERATION (per target):")
+		fmt.Println(" " + strings.Repeat("═", 55))
+
+		for _, tr := range report.Targets {
+			if tr.Error != nil {
+				continue
+			}
+			cyan := color.New(color.FgCyan)
+			cyan.Printf("\n  Enumerating ciphers for %s...\n", tr.Target)
+			enumResult, err := EnumerateCiphers(tr.Target, 443)
+			if err != nil {
+				color.Yellow("  ⚠ %s: cipher enumeration failed: %v\n", tr.Target, err)
+				continue
+			}
+			PrintCipherEnumReport(enumResult)
 		}
 	}
 
