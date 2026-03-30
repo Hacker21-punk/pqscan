@@ -32,6 +32,7 @@ func printUsage() {
 	cyan.Println("    pqscan --full-scan <domain>                   Full cipher enumeration")
 	cyan.Println("    pqscan --chain <domain>                      Deep cert chain analysis")
 	cyan.Println("    pqscan --enumerate <domain>                  Discover subdomains first")
+	cyan.Println("    pqscan --audit <domain>                       CISO audit report (PDF)")
 	cyan.Println("    pqscan <domain1> <domain2> <domain3>          Multiple targets")
 	cyan.Println("    pqscan --targets servers.txt                  Scan from file")
 	cyan.Println("    pqscan --format json <domain>                 JSON output")
@@ -58,6 +59,8 @@ func printUsage() {
 	cyan.Println("    pqscan --full-scan --chain google.com")
 	cyan.Println("    pqscan --chain --enumerate example.com")
 	cyan.Println("    pqscan --enumerate google.com")
+	cyan.Println("    pqscan --audit google.com")
+	cyan.Println("    pqscan --audit -o ciso-report.pdf google.com")
 	cyan.Println("    pqscan google.com github.com cloudflare.com")
 	cyan.Println("    pqscan --format html --chain google.com")
 	cyan.Println("    pqscan --format pdf -o executive-report.pdf google.com")
@@ -84,6 +87,15 @@ func printUsage() {
 	cyan.Println("      • Certificate Transparency logs (crt.sh)")
 	cyan.Println("      • DNS brute-force (200 common subdomains)")
 	cyan.Println("      • DNS records (MX, NS, SRV, TXT/SPF)")
+	fmt.Println()
+	white.Println("  AUDIT REPORT:")
+	cyan.Println("    Generates a comprehensive CISO-ready PDF audit report:")
+	cyan.Println("      • Executive summary with quantum risk score")
+	cyan.Println("      • Full cipher enumeration results")
+	cyan.Println("      • Certificate chain analysis")
+	cyan.Println("      • NIST PQC migration recommendations")
+	cyan.Println("      • Compliance mapping (SOC2, FedRAMP, CNSA 2.0)")
+	cyan.Println("      • Prioritized remediation roadmap")
 	fmt.Println()
 	white.Println("  CBOM (Cryptographic Bill of Materials):")
 	cyan.Println("    Machine-readable inventory of all cryptographic assets.")
@@ -113,6 +125,7 @@ func main() {
 	enumerate := false
 	chainAnalysis := false
 	fullScan := false
+	auditReport := false
 	workers := 3
 	var targets []string
 
@@ -150,6 +163,8 @@ func main() {
 			chainAnalysis = true
 		case "--full-scan", "--full":
 			fullScan = true
+		case "--audit":
+			auditReport = true
 		case "--quiet", "-q":
 			quiet = true
 		case "--help", "-h":
@@ -217,24 +232,56 @@ func main() {
 		}
 
 		// Certificate chain analysis
+		var chainResult *CertChainResult
 		if chainAnalysis {
 			chain, chainErr := AnalyzeCertificateChain(targets[0], 443)
 			if chainErr != nil {
 				color.Yellow("  ⚠ Chain analysis failed: %v", chainErr)
 			} else {
+				chainResult = chain
 				PrintCertChainReport(chain)
 			}
 		}
 
 		// Full cipher enumeration
+		var enumResult *CipherEnumResult
 		if fullScan {
 			cyan := color.New(color.FgCyan)
 			cyan.Println("\n  Running full cipher enumeration (this takes 30-60 seconds)...")
-			enumResult, enumErr := EnumerateCiphers(targets[0], 443)
+			result, enumErr := EnumerateCiphers(targets[0], 443)
 			if enumErr != nil {
 				color.Yellow("  ⚠ Cipher enumeration failed: %v", enumErr)
 			} else {
-				PrintCipherEnumReport(enumResult)
+				enumResult = result
+				PrintCipherEnumReport(result)
+			}
+		}
+
+		// Audit report
+		if auditReport {
+			auditFile := outputFile
+			if auditFile == "" {
+				auditFile = targets[0] + "-audit-report.pdf"
+			}
+
+			cyan := color.New(color.FgCyan)
+			cyan.Println("\n  Generating CISO audit report...")
+
+			// Run cipher enumeration if not already done
+			if !fullScan {
+				cyan.Println("  Running cipher enumeration for audit...")
+				enumResult, _ = EnumerateCiphers(targets[0], 443)
+			}
+
+			// Run chain analysis if not already done
+			if !chainAnalysis {
+				cyan.Println("  Running certificate chain analysis for audit...")
+				chainResult, _ = AnalyzeCertificateChain(targets[0], 443)
+			}
+
+			err := GenerateAuditReport(targets[0], results, enumResult, chainResult, auditFile)
+			if err != nil {
+				color.Yellow("  ⚠ Audit report generation failed: %v", err)
 			}
 		}
 
@@ -287,6 +334,41 @@ func main() {
 				continue
 			}
 			PrintCipherEnumReport(enumResult)
+		}
+	}
+
+	// Audit report for multi-target
+	if auditReport {
+		white := color.New(color.FgWhite, color.Bold)
+		white.Println("\n GENERATING AUDIT REPORTS (per target):")
+		fmt.Println(" " + strings.Repeat("═", 55))
+
+		for _, tr := range report.Targets {
+			if tr.Error != nil {
+				continue
+			}
+
+			cyan := color.New(color.FgCyan)
+			cyan.Printf("\n  Generating audit report for %s...\n", tr.Target)
+
+			auditFile := tr.Target + "-audit-report.pdf"
+
+			var enumResult *CipherEnumResult
+			var chainResult *CertChainResult
+
+			cyan.Printf("  Running cipher enumeration for %s...\n", tr.Target)
+			enumResult, _ = EnumerateCiphers(tr.Target, 443)
+
+			cyan.Printf("  Running chain analysis for %s...\n", tr.Target)
+			chainResult, _ = AnalyzeCertificateChain(tr.Target, 443)
+
+			err := GenerateAuditReport(tr.Target, tr.Results, enumResult, chainResult, auditFile)
+			if err != nil {
+				color.Yellow("  ⚠ %s: audit report failed: %v\n", tr.Target, err)
+			} else {
+				green := color.New(color.FgGreen)
+				green.Printf("  ✓ Saved: %s\n", auditFile)
+			}
 		}
 	}
 
