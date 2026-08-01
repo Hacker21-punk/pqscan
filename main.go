@@ -288,7 +288,7 @@ func main() {
 		outputResults(format, outputFile, targets[0], results, quiet)
 
 		for _, r := range results {
-			if strings.Contains(r.RiskLevel, "CRITICAL") {
+			if isVulnerable(r.RiskLevel) {
 				os.Exit(1)
 			}
 		}
@@ -425,7 +425,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if report.TotalCritical > 0 {
+	if report.TotalVulnerable > 0 {
 		os.Exit(1)
 	}
 }
@@ -468,7 +468,7 @@ func outputResults(format, outputFile, target string, results []ScanResult, quie
 		if quiet {
 			vulnerable := 0
 			for _, r := range results {
-				if r.RiskLevel != "SAFE" {
+				if r.RiskLevel != RiskSafe {
 					vulnerable++
 				}
 			}

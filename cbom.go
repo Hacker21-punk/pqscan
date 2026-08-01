@@ -415,7 +415,7 @@ func buildCertKeyComponent(ref string, r ScanResult) CBOMComponent {
 				CryptoFunctions:         []string{"sign", "verify"},
 				ExecutionEnvironment:    "server",
 				ClassicalSecurityLevel:  getKeyClassicalSecurity(keyAlg, keySize),
-				NistQuantumSecurityLevel: 0, // broken by quantum
+				NistQuantumSecurityLevel: getNistQuantumSecurityLevel(keyAlg, keySize),
 			},
 		},
 		Properties: []CBOMProperty{
@@ -611,4 +611,25 @@ func getKeyClassicalSecurity(alg string, keySize int) int {
 	default:
 		return 0
 	}
+}
+
+func getNistQuantumSecurityLevel(alg string, keySize int) int {
+	upper := strings.ToUpper(alg)
+	if strings.Contains(upper, "ML-DSA") || strings.Contains(upper, "DILITHIUM") {
+		// ML-DSA/Dilithium security categories:
+		// ML-DSA-44 / Dilithium2: Category 2
+		// ML-DSA-65 / Dilithium3: Category 3
+		// ML-DSA-87 / Dilithium5: Category 5
+		if strings.Contains(upper, "44") || strings.Contains(upper, "2") {
+			return 2
+		}
+		if strings.Contains(upper, "65") || strings.Contains(upper, "3") {
+			return 3
+		}
+		if strings.Contains(upper, "87") || strings.Contains(upper, "5") {
+			return 5
+		}
+		return 3 // Default fallback
+	}
+	return 0 // Broken by quantum (RSA, ECDSA, Ed25519)
 }

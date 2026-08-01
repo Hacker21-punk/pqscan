@@ -5,7 +5,16 @@
 set -e
 
 REPO="Hacker21-punk/pqscan"
-VERSION="v0.1.0"
+# Determine version dynamically from GitHub Releases if not pre-set
+if [ -z "$VERSION" ] || [ "$VERSION" = "v0.1.0" ]; then
+  LATEST_RELEASE=$(curl -sSfL --connect-timeout 5 "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)
+  if [ -n "$LATEST_RELEASE" ]; then
+    VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  else
+    VERSION="v0.1.0" # Fallback
+  fi
+fi
+
 INSTALL_DIR="/usr/local/bin"
 
 # Detect OS and architecture
@@ -28,9 +37,33 @@ esac
 echo "Installing pqscan ${VERSION} for ${OS}/${ARCH}..."
 
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}"
+CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
-# Download
+# Download binary and checksums
 curl -sSfL "$URL" -o /tmp/pqscan
+curl -sSfL "$CHECKSUM_URL" -o /tmp/checksums.txt 2>/dev/null || true
+
+# Integrity verification
+if [ -f /tmp/checksums.txt ]; then
+  echo "Verifying checksum..."
+  grep "${BINARY}" /tmp/checksums.txt > /tmp/check.txt || true
+  if [ -s /tmp/check.txt ]; then
+    cd /tmp
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c check.txt
+    elif command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 -c check.txt
+    else
+      echo "⚠ Verification tools missing (sha256sum/shasum); skipping check"
+    fi
+    cd - >/dev/null
+  else
+    echo "⚠ Binary checksum not found in checksums.txt; skipping verification"
+  fi
+else
+  echo "⚠ No checksums.txt found for release; skipping verification"
+fi
+
 chmod +x /tmp/pqscan
 
 # Install
@@ -48,3 +81,4 @@ echo "  pqscan google.com"
 echo "  pqscan --format html -o report.html example.com"
 echo ""
 pqscan --version
+

@@ -68,13 +68,11 @@ func PrintJSONReport(target string, results []ScanResult, outputFile string) err
 	critical, high, moderate, safe := 0, 0, 0, 0
 	for _, r := range results {
 		switch {
-		case strings.Contains(r.RiskLevel, "CRITICAL"):
+		case isCritical(r.RiskLevel):
 			critical++
-		case strings.Contains(r.RiskLevel, "HIGH"):
+		case r.RiskLevel == RiskHNDL:
 			high++
-		case strings.Contains(r.RiskLevel, "MODERATE"):
-			moderate++
-		case r.RiskLevel == "SAFE":
+		case r.RiskLevel == RiskSafe:
 			safe++
 		default:
 			critical++

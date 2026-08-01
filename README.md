@@ -7,11 +7,11 @@
 **Find it before the quantum computer does.**
 
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
 [![NIST PQC](https://img.shields.io/badge/NIST-FIPS%20203%2F204%2F205-blue?style=flat-square)](https://csrc.nist.gov/projects/post-quantum-cryptography)
 [![CNSA 2.0](https://img.shields.io/badge/NSA-CNSA%202.0-red?style=flat-square)](https://media.defense.gov/2022/Sep/07/2003071834/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS_.PDF)
 
-[Features](#features) · [Installation](#installation) · [Quick Start](#quick-start) · [Audit Reports](#audit-reports) · [Sample Reports](#sample-reports) · [API Server](#api-server) · [Documentation](#documentation)
+[Features](#features) · [Installation](#installation)
 
 ---
 
@@ -25,16 +25,17 @@
 
 Every RSA key, every ECDSA certificate, every Diffie-Hellman key exchange your servers negotiate today will be **completely broken** by a cryptographically relevant quantum computer running [Shor's algorithm](https://en.wikipedia.org/wiki/Shor%27s_algorithm).
 
-**The timeline:**
+**Official CNSA 2.0 Timeline (NSA guidelines):**
 
-| Year | Event |
-|------|-------|
-| **2024** | NIST finalizes FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA) |
-| **2025** | NSA CNSA 2.0: Prefer PQC for new systems |
-| **2026** | First compliance audit deadlines |
-| **2030** | CNSA 2.0: TLS must support quantum-safe key exchange |
-| **2033** | CNSA 2.0: All protocols must be fully quantum-safe |
-| **NOW** | [Harvest Now, Decrypt Later](https://en.wikipedia.org/wiki/Harvest_now,_decrypt_later) attacks are active |
+| Year / Milestone | Affected Category | Requirement |
+|------------------|-------------------|-------------|
+| **2025** | Software/firmware signing | Begin transitioning to post-quantum signatures (ML-DSA / LMS / XMSS) |
+| **2025** | Web browsers and servers | Begin transitioning to post-quantum key exchange (ML-KEM) and signatures |
+| **2026** | Traditional network equipment | Begin transitioning to post-quantum algorithms |
+| **2030 (Mandated)** | Software/firmware signing | Migration MUST be complete; classical algorithms no longer accepted |
+| **2030 (Mandated)** | Traditional network equipment | Migration MUST be complete; classical algorithms no longer accepted |
+| **2033 (Mandated)** | Web browsers and servers | Migration MUST be complete; classical TLS (ECDHE/RSA) no longer accepted |
+| **NOW** | All encrypted network traffic | [Harvest Now, Decrypt Later](https://en.wikipedia.org/wiki/Harvest_now,_decrypt_later) (HNDL) attacks are active |
 
 Nation-state adversaries are **already recording encrypted traffic** for future decryption. If your data must remain confidential for more than 10 years — trade secrets, health records, financial data, attorney-client communications — the threat is **not future. It is present.**
 

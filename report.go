@@ -34,13 +34,11 @@ func PrintReport(target string, results []ScanResult) {
 
 	for _, r := range results {
 		switch {
-		case strings.Contains(r.RiskLevel, "CRITICAL"):
+		case isCritical(r.RiskLevel):
 			critical++
-		case strings.Contains(r.RiskLevel, "HIGH"):
+		case r.RiskLevel == RiskHNDL:
 			high++
-		case strings.Contains(r.RiskLevel, "MODERATE"):
-			moderate++
-		case r.RiskLevel == "SAFE":
+		case r.RiskLevel == RiskSafe:
 			safe++
 		default:
 			critical++ // assume worst case
@@ -124,9 +122,9 @@ func PrintReport(target string, results []ScanResult) {
 		svcCritical := 0
 		svcSafe := 0
 		for _, r := range svcResults {
-			if strings.Contains(r.RiskLevel, "CRITICAL") {
+			if isCritical(r.RiskLevel) {
 				svcCritical++
-			} else if r.RiskLevel == "SAFE" {
+			} else if r.RiskLevel == RiskSafe {
 				svcSafe++
 			}
 		}
@@ -135,8 +133,20 @@ func PrintReport(target string, results []ScanResult) {
 			red.Printf("   %-15s %d endpoint(s)   🔴 VULNERABLE\n",
 				service, len(svcResults))
 		} else {
-			green.Printf("   %-15s %d endpoint(s)   🟢 SAFE\n",
-				service, len(svcResults))
+			// Check if any are quantum-vulnerable
+			svcVuln := 0
+			for _, r := range svcResults {
+				if isVulnerable(r.RiskLevel) {
+					svcVuln++
+				}
+			}
+			if svcVuln > 0 {
+				yellow.Printf("   %-15s %d endpoint(s)   ⚠  Q-VULNERABLE\n",
+					service, len(svcResults))
+			} else {
+				green.Printf("   %-15s %d endpoint(s)   🟢 SAFE\n",
+					service, len(svcResults))
+			}
 		}
 	}
 
@@ -151,13 +161,13 @@ func PrintReport(target string, results []ScanResult) {
 
 		// Risk indicator and finding header
 		switch {
-		case strings.Contains(r.RiskLevel, "CRITICAL"):
+		case isCritical(r.RiskLevel):
 			red.Printf(" 🔴 Finding #%d — %s:%d (%s)\n",
 				i+1, r.Host, r.Port, r.Service)
-		case r.RiskLevel == "SAFE":
+		case r.RiskLevel == RiskSafe:
 			green.Printf(" 🟢 Finding #%d — %s:%d (%s)\n",
 				i+1, r.Host, r.Port, r.Service)
-		default:
+		default: // RiskHNDL
 			yellow.Printf(" 🟡 Finding #%d — %s:%d (%s)\n",
 				i+1, r.Host, r.Port, r.Service)
 		}
@@ -221,13 +231,13 @@ func PrintReport(target string, results []ScanResult) {
 
 		// Risk assessment
 		fmt.Println()
-		if strings.Contains(r.RiskLevel, "CRITICAL") {
+		if isCritical(r.RiskLevel) {
 			red.Printf("    RISK:           %s\n", r.RiskLevel)
 			red.Printf("    THREAT:         %s\n", r.QuantumThreat)
-		} else if r.RiskLevel == "SAFE" {
+		} else if r.RiskLevel == RiskSafe {
 			green.Printf("    RISK:           %s\n", r.RiskLevel)
 			green.Printf("    THREAT:         None\n")
-		} else {
+		} else { // RiskHNDL
 			yellow.Printf("    RISK:           %s\n", r.RiskLevel)
 			yellow.Printf("    THREAT:         %s\n", r.QuantumThreat)
 		}
@@ -247,15 +257,15 @@ func PrintReport(target string, results []ScanResult) {
 	}
 
 	milestones := []milestone{
-		{"2025", "Prefer PQC for new systems"},
-		{"2027", "New systems MUST use PQC"},
-		{"2030", "Legacy crypto must begin migration"},
-		{"2033", "All protocols must be quantum-safe"},
-		{"2035", "Complete migration — no exceptions"},
+		{"2025 (SW)",     "Begin software/firmware signing migration"},
+		{"2025 (Web)",    "Begin web browser/server migration"},
+		{"2026 (Network)", "Begin networking equipment migration"},
+		{"2030 (Mandated)", "Software & network equipment MUST be PQC-safe"},
+		{"2033 (Mandated)", "Web browsers & servers MUST be PQC-safe"},
 	}
 
 	for _, m := range milestones {
-		if critical > 0 {
+		if vulnerable > 0 {
 			red.Printf("    %s  %-40s ❌ FAILING\n", m.year, m.desc)
 		} else {
 			green.Printf("    %s  %-40s ✅ PASSING\n", m.year, m.desc)
@@ -268,8 +278,8 @@ func PrintReport(target string, results []ScanResult) {
 	white.Println(" ⚠  HARVEST NOW, DECRYPT LATER (HNDL) RISK:")
 	fmt.Println()
 
-	if critical > 0 {
-		red.Println("    Status: CRITICAL")
+	if vulnerable > 0 {
+		red.Println("    Status: VULNERABLE")
 		fmt.Println()
 		yellow.Println("    Nation-state adversaries are ALREADY recording encrypted")
 		yellow.Println("    traffic. When quantum computers become available, they")
@@ -292,11 +302,11 @@ func PrintReport(target string, results []ScanResult) {
 	white.Println(" MIGRATION ESTIMATE:")
 	fmt.Println()
 
-	if critical > 0 {
+	if vulnerable > 0 {
 		configChanges := 0
 		hardChanges := 0
 		for _, r := range results {
-			if strings.Contains(r.RiskLevel, "CRITICAL") {
+			if isVulnerable(r.RiskLevel) {
 				switch r.Service {
 				case "HTTPS", "HTTPS-Alt":
 					configChanges++
@@ -335,15 +345,13 @@ func PrintReport(target string, results []ScanResult) {
 
 func riskPriority(risk string) int {
 	switch {
-	case strings.Contains(risk, "CRITICAL"):
+	case isCritical(risk):
 		return 100
-	case strings.Contains(risk, "HIGH"):
+	case risk == RiskHNDL:
 		return 75
-	case strings.Contains(risk, "MODERATE"):
-		return 50
-	case risk == "SAFE":
+	case risk == RiskSafe:
 		return 0
 	default:
-		return 90
+		return 50
 	}
 }
