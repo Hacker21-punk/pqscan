@@ -341,7 +341,7 @@ func ScanTarget(ctx context.Context, target string) ([]ScanResult, error) {
 		}
 		fmt.Printf("%d/%s", p.Port, p.Service)
 	}
-	fmt.Println("\n")
+	fmt.Print("\n\n")
 
 	// Scan each open port
 	for _, portDef := range openPorts {

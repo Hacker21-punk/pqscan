@@ -23,7 +23,7 @@ const banner = `
 `
 
 func printUsage() {
-	fmt.Println(banner)
+	fmt.Print(banner)
 	cyan := color.New(color.FgCyan)
 	white := color.New(color.FgWhite, color.Bold)
 
@@ -198,7 +198,7 @@ func main() {
 	}
 
 	if !quiet {
-		fmt.Println(banner)
+		fmt.Print(banner)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
