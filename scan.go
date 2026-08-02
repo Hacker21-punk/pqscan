@@ -137,6 +137,11 @@ func probeSSHKexAlgorithms(ctx context.Context, host string, port int) (kexAlgos
 		return nil, banner, fmt.Errorf("unexpected SSH banner: %q", banner)
 	}
 
+	// Send our client identification banner so the server proceeds to send its KEXINIT.
+	if _, err := conn.Write([]byte("SSH-2.0-pqscan-probe\r\n")); err != nil {
+		return nil, banner, fmt.Errorf("write SSH client banner: %w", err)
+	}
+
 	// RFC 4253 §6: BinaryPacket = uint32(length) | byte(padding_len) | payload | padding
 	// The server sends SSH_MSG_KEXINIT as its first binary packet immediately after the banner.
 	var pktLenBuf [4]byte
