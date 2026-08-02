@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -11,6 +12,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"net"
@@ -193,76 +195,120 @@ func TestTLSPathways(t *testing.T) {
 	}
 }
 
-// generateSSHHostKey produces a dynamic SSH host key for testing
-func generateSSHHostKey() (ssh.Signer, error) {
-	rsaPriv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
+// buildKexInitPacket constructs a raw binary SSH_MSG_KEXINIT packet containing custom key exchanges
+func buildKexInitPacket(kexAlgos string) []byte {
+	var payload []byte
+	payload = append(payload, 20) // SSH_MSG_KEXINIT
+	cookie := make([]byte, 16)
+	payload = append(payload, cookie...)
+
+	appendStr := func(s string) {
+		length := uint32(len(s))
+		var lenBuf [4]byte
+		binary.BigEndian.PutUint32(lenBuf[:], length)
+		payload = append(payload, lenBuf[:]...)
+		payload = append(payload, []byte(s)...)
 	}
-	return ssh.NewSignerFromKey(rsaPriv)
+
+	appendStr(kexAlgos)                  // kex_algorithms
+	appendStr("ssh-ed25519,ssh-rsa")     // server_host_key_algorithms
+	appendStr("aes128-ctr,aes256-ctr")   // encryption_algorithms_client_to_server
+	appendStr("aes128-ctr,aes256-ctr")   // encryption_algorithms_server_to_client
+	appendStr("hmac-sha2-256")           // mac_algorithms_client_to_server
+	appendStr("hmac-sha2-256")           // mac_algorithms_server_to_client
+	appendStr("none")                    // compression_algorithms_client_to_server
+	appendStr("none")                    // compression_algorithms_server_to_client
+	appendStr("")                        // languages_client_to_server
+	appendStr("")                        // languages_server_to_client
+	payload = append(payload, 0)          // first_kex_packet_follows (false)
+	payload = append(payload, 0, 0, 0, 0) // reserved (uint32)
+
+	payloadLen := len(payload)
+	paddingLen := 4
+	for (1+payloadLen+paddingLen)%8 != 0 {
+		paddingLen++
+	}
+
+	pktLen := uint32(1 + payloadLen + paddingLen)
+	var pktLenBuf [4]byte
+	binary.BigEndian.PutUint32(pktLenBuf[:], pktLen)
+
+	var packet []byte
+	packet = append(packet, pktLenBuf[:]...)
+	packet = append(packet, byte(paddingLen))
+	packet = append(packet, payload...)
+	packet = append(packet, make([]byte, paddingLen)...)
+
+	return packet
+}
+
+// startMockSSHServer stands up a mock SSH server that expects two connections sequentially
+func startMockSSHServer(t *testing.T, kexAlgos string) (int, func()) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	go func() {
+		// Connection 1 (Phase 1: probeSSHKexAlgorithms)
+		conn1, err := ln.Accept()
+		if err == nil {
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = c.Write([]byte("SSH-2.0-MockSSHServer\r\n"))
+				reader := bufio.NewReader(c)
+				_, _ = reader.ReadString('\n')
+				packet := buildKexInitPacket(kexAlgos)
+				_, _ = c.Write(packet)
+			}(conn1)
+		}
+
+		// Connection 2 (Phase 2: full handshake reconnect)
+		conn2, err := ln.Accept()
+		if err == nil {
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = c.Write([]byte("SSH-2.0-MockSSHServer\r\n"))
+				reader := bufio.NewReader(c)
+				_, _ = reader.ReadString('\n')
+			}(conn2)
+		}
+	}()
+
+	_, portStr, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("failed to split host/port: %v", err)
+	}
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+
+	return port, func() { ln.Close() }
 }
 
 // TestSSHPathways runs table-driven tests checking both the PQC-advertised pathway
 // and the classical-only pathway.
 func TestSSHPathways(t *testing.T) {
-	hostKey, err := generateSSHHostKey()
-	if err != nil {
-		t.Fatalf("failed to generate host key: %v", err)
-	}
-
 	tests := []struct {
-		name         string
-		keyExchanges []string
-		wantRisk     string
+		name     string
+		kexAlgos string
+		wantRisk string
 	}{
 		{
-			name:         "SSH PQC Pathway",
-			keyExchanges: []string{"sntrup761x25519-sha512@openssh.com", "curve25519-sha256"},
-			wantRisk:     RiskSafe,
+			name:     "SSH PQC Pathway",
+			kexAlgos: "sntrup761x25519-sha512@openssh.com,curve25519-sha256",
+			wantRisk: RiskSafe,
 		},
 		{
-			name:         "SSH Classical Pathway",
-			keyExchanges: []string{"curve25519-sha256", "diffie-hellman-group14-sha256"},
-			wantRisk:     RiskHNDL,
+			name:     "SSH Classical Pathway",
+			kexAlgos: "curve25519-sha256,diffie-hellman-group14-sha256",
+			wantRisk: RiskHNDL,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			serverConfig := &ssh.ServerConfig{
-				Config: ssh.Config{
-					KeyExchanges: tc.keyExchanges,
-				},
-				NoClientAuth: true,
-			}
-			serverConfig.AddHostKey(hostKey)
-
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatalf("net.Listen failed: %v", err)
-			}
-			defer ln.Close()
-
-			go func() {
-				for {
-					conn, err := ln.Accept()
-					if err != nil {
-						return
-					}
-					go func(c net.Conn) {
-						defer c.Close()
-						_, _, _, err := ssh.NewServerConn(c, serverConfig)
-						_ = err // client closing/failing auth is fine
-					}(conn)
-				}
-			}()
-
-			_, portStr, err := net.SplitHostPort(ln.Addr().String())
-			if err != nil {
-				t.Fatalf("failed to split host/port: %v", err)
-			}
-			var port int
-			fmt.Sscanf(portStr, "%d", &port)
+			port, cleanup := startMockSSHServer(t, tc.kexAlgos)
+			defer cleanup()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
