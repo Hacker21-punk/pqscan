@@ -93,6 +93,10 @@ var sshPQCKexAlgorithms = map[string]string{
 	"mlkem768x25519-sha256@openssh.com":   "ML-KEM-768+X25519 (OpenSSH vendor)",
 }
 
+// testHookPortScan is a package-level test hook to simulate panics/behavior
+// inside the concurrent ScanTarget port loop.
+var testHookPortScan func(pd PortDef)
+
 // probeSSHKexAlgorithms opens a raw TCP connection and parses the server's
 // SSH_MSG_KEXINIT packet (RFC 4253 §7.1) to extract the server's advertised
 // kex_algorithms name-list — before the Go SSH library takes over the
@@ -265,7 +269,14 @@ type PortDef struct {
 	Type    string // "tls", "ssh", "starttls-smtp", "starttls-imap", "starttls-pop3"
 }
 
+// defaultPortsOverride allows integration tests to redirect port scanning
+// to custom ephemeral ports on loopback.
+var defaultPortsOverride []PortDef
+
 func getDefaultPorts() []PortDef {
+	if defaultPortsOverride != nil {
+		return defaultPortsOverride
+	}
 	return []PortDef{
 		// TLS ports
 		{443, "HTTPS", "tls"},
@@ -340,6 +351,10 @@ func ScanTarget(ctx context.Context, target string) ([]ScanResult, error) {
 						target, pd.Port, pd.Service, r)
 				}
 			}()
+
+			if testHookPortScan != nil {
+				testHookPortScan(pd)
+			}
 
 			var result *ScanResult
 			var err error
