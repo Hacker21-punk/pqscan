@@ -19,8 +19,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // generateCert produces a self-signed tls.Certificate and its parsed x509.Certificate
