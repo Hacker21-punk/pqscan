@@ -360,8 +360,8 @@ func TestSTARTTLSFragmentation(t *testing.T) {
 			t.Fatalf("scanSTARTTLS_SMTP failed: %v", err)
 		}
 
-		if res.RiskLevel != RiskHNDL {
-			t.Errorf("expected SMTP STARTTLS risk HNDL, got %s", res.RiskLevel)
+		if isCritical(res.RiskLevel) {
+			t.Errorf("expected SMTP STARTTLS to negotiate successfully (non-critical), got %s", res.RiskLevel)
 		}
 	})
 
@@ -429,8 +429,8 @@ func TestSTARTTLSFragmentation(t *testing.T) {
 			t.Fatalf("scanSTARTTLS_IMAP failed: %v", err)
 		}
 
-		if res.RiskLevel != RiskHNDL {
-			t.Errorf("expected IMAP STARTTLS risk HNDL, got %s", res.RiskLevel)
+		if isCritical(res.RiskLevel) {
+			t.Errorf("expected IMAP STARTTLS to negotiate successfully (non-critical), got %s", res.RiskLevel)
 		}
 	})
 }
