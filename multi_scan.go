@@ -93,6 +93,7 @@ func ScanMultipleTargets(ctx context.Context, targets []string, workers int) Agg
 
 	cyan := color.New(color.FgCyan)
 	green := color.New(color.FgGreen, color.Bold)
+	yellow := color.New(color.FgYellow, color.Bold)
 	red := color.New(color.FgRed, color.Bold)
 	white := color.New(color.FgWhite, color.Bold)
 	dim := color.New(color.FgWhite)

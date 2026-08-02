@@ -30,8 +30,14 @@ import (
 // It checks state.CurveID FIRST — this is the only reliable way to detect
 // a PQC hybrid key exchange in TLS 1.3, because TLS 1.3 cipher suite names
 // (e.g. TLS_AES_256_GCM_SHA384) never encode the key-exchange group. The
-// constants below are defined in crypto/tls since Go 1.24 and match IANA
-// TLS Named Groups registry values for the ML-KEM hybrids.
+// constants below match IANA TLS Named Groups registry values for the ML-KEM
+// hybrids.  X25519MLKEM768 is exported by crypto/tls since Go 1.24; the NIST-
+// curve variants are defined locally until the stdlib exports them.
+const (
+	curveSecP256r1MLKEM768  tls.CurveID = 4587 // IANA 0x11EB
+	curveSecP384r1MLKEM1024 tls.CurveID = 4589 // IANA 0x11ED
+)
+
 func classifyTLSConnection(state tls.ConnectionState) (keyExchange, riskLevel, quantumThreat, remediation string) {
 	switch state.CurveID {
 	case tls.X25519MLKEM768:
@@ -39,12 +45,12 @@ func classifyTLSConnection(state tls.ConnectionState) (keyExchange, riskLevel, q
 			RiskSafe,
 			"None — X25519+ML-KEM-768 is post-quantum safe",
 			"No action needed — already quantum safe"
-	case tls.SecP256r1MLKEM768:
+	case curveSecP256r1MLKEM768:
 		return "P-256+ML-KEM-768 (FIPS 203 hybrid)",
 			RiskSafe,
 			"None — P-256+ML-KEM-768 is post-quantum safe",
 			"No action needed — already quantum safe"
-	case tls.SecP384r1MLKEM1024:
+	case curveSecP384r1MLKEM1024:
 		return "P-384+ML-KEM-1024 (FIPS 203 hybrid)",
 			RiskSafe,
 			"None — P-384+ML-KEM-1024 is post-quantum safe",
