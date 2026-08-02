@@ -36,16 +36,16 @@ func isCritical(risk string) bool { return risk == RiskCritical }
 func extractKeyExchange(cipherSuite string) string {
 	suite := strings.ToUpper(cipherSuite)
 	switch {
+	case strings.Contains(suite, "CECPQ"):
+		return "CECPQ2 (Hybrid Post-Quantum)"
+	case strings.Contains(suite, "KYBER"), strings.Contains(suite, "MLKEM"):
+		return "ML-KEM (Post-Quantum Safe)"
 	case strings.Contains(suite, "ECDHE"):
 		return "ECDHE (Elliptic Curve Diffie-Hellman)"
 	case strings.Contains(suite, "DHE"):
 		return "DHE (Diffie-Hellman Ephemeral)"
 	case strings.Contains(suite, "RSA"):
 		return "RSA Key Transport"
-	case strings.Contains(suite, "CECPQ"):
-		return "CECPQ2 (Hybrid Post-Quantum)"
-	case strings.Contains(suite, "KYBER"), strings.Contains(suite, "MLKEM"):
-		return "ML-KEM (Post-Quantum Safe)"
 	default:
 		// TLS 1.3: key exchange is negotiated independently of the suite name.
 		// The actual group is in state.CurveID — see classifyTLSConnection.
