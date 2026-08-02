@@ -3,6 +3,8 @@ name: Quantum Scan
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -19,6 +21,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+
+      - name: Run tests
+        run: go test -race -v ./...
 
       - name: Build pqscan
         run: |
